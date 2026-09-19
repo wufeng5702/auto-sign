@@ -79,10 +79,10 @@ type (
 
 	SignResponse struct {
 		Info       []any `json:"info"`
-		ServerTime int   `json:"server_time"`
-		Time       int   `json:"time"`
-		Ctime      int   `json:"ctime"`
-		Logid      int64 `json:"logid"`
+		ServerTime any   `json:"server_time"`
+		Time       any   `json:"time"`
+		Ctime      any   `json:"ctime"`
+		Logid      any   `json:"logid"`
 	}
 )
 
