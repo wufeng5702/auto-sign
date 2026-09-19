@@ -2,6 +2,7 @@ package tieba
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"slices"
@@ -39,6 +40,9 @@ func Sign(ctx context.Context) error {
 	}
 
 	gcons := slices.Concat(favorite.ForumList.GconForum, favorite.ForumList.NonGconForum)
+
+	var errs []error
+
 	// 遍历所有吧，执行签到操作
 	for _, gcon := range gcons {
 		log.DebugContext(ctx, "sign", "gcon", gcon)
@@ -50,6 +54,7 @@ func Sign(ctx context.Context) error {
 		})
 		if err != nil {
 			log.ErrorContext(ctx, "sign", "err", err)
+			errs = append(errs, err)
 
 			continue
 		}
@@ -57,5 +62,5 @@ func Sign(ctx context.Context) error {
 		log.DebugContext(ctx, "sign", "sign", sign)
 	}
 
-	return nil
+	return errors.Join(errs...)
 }

@@ -52,12 +52,28 @@ type Client struct {
 	tbs           string
 	tbsExpireTime time.Time
 
+	// 重试相关字段
+	maxRetries int
+	retryDelay time.Duration
+
 	// TODO 邮件通知等？
 }
 
 func WithLog(log *slog.Logger) Option {
 	return func(c *Client) {
 		c.log = log
+	}
+}
+
+func WithMaxRetries(n int) Option {
+	return func(c *Client) {
+		c.maxRetries = max(n, 1)
+	}
+}
+
+func WithRetryDelay(delay time.Duration) Option {
+	return func(c *Client) {
+		c.retryDelay = max(delay, 0)
 	}
 }
 
@@ -74,6 +90,9 @@ func NewClient(bduss string, opts ...Option) (*Client, error) {
 			Timeout: 10 * time.Second,
 		},
 		log: slog.Default(),
+
+		maxRetries: 3,
+		retryDelay: time.Second,
 	}
 
 	for _, opt := range opts {
@@ -612,26 +631,34 @@ func (c *Client) header() http.Header {
 	return h
 }
 
-func (c *Client) doWithJSON(req *http.Request, point any) error {
+func (c *Client) doWithJSON(req *http.Request, point any) (err error) {
 	for k, values := range c.header() {
 		for _, v := range values {
 			req.Header.Add(k, v)
 		}
 	}
 
-	resp, err := c.client.Do(req)
+	var body []byte
+	err = c.retry(func() (err error) {
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("read body error: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("http status code: %d", resp.StatusCode)
+		}
+
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read body error: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("http status code: %d", resp.StatusCode)
 	}
 
 	// 错误检查
@@ -649,6 +676,21 @@ func (c *Client) doWithJSON(req *http.Request, point any) error {
 	err = json.Unmarshal(body, point)
 	if err != nil {
 		return fmt.Errorf("json decode point %s , err: %w", req.Host, err)
+	}
+
+	return nil
+}
+
+func (c *Client) retry(f func() error) error {
+	var err error
+
+	for i := 0; i < c.maxRetries; i++ {
+		err = f()
+		if err == nil {
+			return nil
+		}
+
+		time.Sleep(c.retryDelay)
 	}
 
 	return nil
